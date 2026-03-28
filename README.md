@@ -37,7 +37,17 @@ A Rust-native terminal UI that watches the cc-dm SQLite bus in real time and ren
 ## Install
 
 ```bash
+# Shell installer (macOS / Linux)
+curl -sSL https://raw.githubusercontent.com/Akram012388/cc-dm-stream/main/install.sh | sh
+
+# Cargo
 cargo install cc-dm-stream
+
+# npm
+npm install -g cc-dm-stream
+
+# Homebrew
+brew tap Akram012388/cc-dm-stream && brew install cc-dm-stream
 ```
 
 Or download a pre-built binary from [Releases](https://github.com/Akram012388/cc-dm-stream/releases).
@@ -66,6 +76,17 @@ cc-dm-stream   ← live streaming TUI (Rust, read-only observer)
 ```
 
 cc-dm-stream is an observer in the ecosystem, not a participant.
+
+## Part of the cc-dm ecosystem
+
+| Project | Description |
+|---------|-------------|
+| [cc-dm](https://github.com/Akram012388/cc-dm) | Peer-to-peer coordination protocol for Claude Code sessions |
+| [cc-dm-stream](https://github.com/Akram012388/cc-dm-stream) | Live streaming TUI observer (this repo) |
+
+## Author
+
+**Akram Ahmed** — [@CodeAkram](https://x.com/CodeAkram)
 
 ## License
 
