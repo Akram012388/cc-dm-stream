@@ -74,7 +74,27 @@ pub struct MessageEntry {
     pub to_session: String,
     pub content: String,
     pub priority: Priority,
+    pub thread_id: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Extract thread_id value from meta JSON string, if present.
+pub fn parse_thread_id(json_str: &str) -> Option<String> {
+    let key_start = json_str.find("\"thread_id\"")?;
+    let after_key = &json_str[key_start + "\"thread_id\"".len()..];
+    let after_colon = &after_key[after_key.find(':')? + 1..];
+    let trimmed = after_colon.trim_start();
+    if !trimmed.starts_with('"') {
+        return None;
+    }
+    let value_start = &trimmed[1..];
+    let end = value_start.find('"')?;
+    let value = &value_start[..end];
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 // --- Prune Alert ---
@@ -291,5 +311,30 @@ mod tests {
     fn priority_low_not_confused_by_later_urgent_key() {
         let json = r#"{"priority":"low","escalation":"urgent"}"#;
         assert_eq!(Priority::from_meta_json(json), Priority::Low);
+    }
+
+    // --- thread_id parsing tests ---
+
+    #[test]
+    fn thread_id_parsed_when_present() {
+        let json = r#"{"thread_id":"design-review","priority":"normal"}"#;
+        assert_eq!(parse_thread_id(json), Some("design-review".to_string()));
+    }
+
+    #[test]
+    fn thread_id_none_when_absent() {
+        let json = r#"{"priority":"normal"}"#;
+        assert_eq!(parse_thread_id(json), None);
+    }
+
+    #[test]
+    fn thread_id_none_when_empty_string() {
+        let json = r#"{"thread_id":""}"#;
+        assert_eq!(parse_thread_id(json), None);
+    }
+
+    #[test]
+    fn thread_id_none_on_empty_meta() {
+        assert_eq!(parse_thread_id("{}"), None);
     }
 }

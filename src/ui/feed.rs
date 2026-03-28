@@ -46,7 +46,7 @@ pub fn message_lines(
         .cloned()
         .unwrap_or_else(|| msg.to_session.clone());
 
-    let header = Line::from(vec![
+    let mut header_spans = vec![
         Span::styled(format!("{} ", ts), Style::default().fg(theme::MUTED)),
         Span::styled(
             msg.from_session.clone(),
@@ -58,7 +58,16 @@ pub fn message_lines(
             format!(" \u{2192} {}:", to_display),
             Style::default().fg(theme::MUTED),
         ),
-    ]);
+    ];
+
+    if let Some(ref tid) = msg.thread_id {
+        header_spans.push(Span::styled(
+            format!(" [{}]", tid),
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+
+    let header = Line::from(header_spans);
 
     // Pre-wrap content to (width - 2) for the "  " indent
     let content_width = width.saturating_sub(2);
@@ -243,6 +252,7 @@ mod tests {
             to_session: to.to_string(),
             content: content.to_string(),
             priority,
+            thread_id: None,
             created_at: Utc::now(),
         }
     }
@@ -307,6 +317,38 @@ mod tests {
             header_text.contains("unknown-id"),
             "header should fallback to raw ID, got: {}",
             header_text
+        );
+    }
+
+    #[test]
+    fn thread_id_rendered_on_header() {
+        let names = make_session_names();
+        let mut msg = make_msg(1, "alice", "session-b", "hi", Priority::Normal);
+        msg.thread_id = Some("design-review".to_string());
+        let lines = message_lines(&msg, 80, &names);
+        let header_text: String = lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        assert!(
+            header_text.contains("[design-review]"),
+            "header should contain thread label, got: {}",
+            header_text
+        );
+    }
+
+    #[test]
+    fn no_thread_id_no_label() {
+        let names = make_session_names();
+        let msg = make_msg(1, "alice", "session-b", "hi", Priority::Normal);
+        let lines = message_lines(&msg, 80, &names);
+        // Header has exactly 3 spans when no thread_id (timestamp, sender, arrow+recipient)
+        assert_eq!(
+            lines[0].spans.len(),
+            3,
+            "header should have 3 spans without thread_id, got {}",
+            lines[0].spans.len()
         );
     }
 
