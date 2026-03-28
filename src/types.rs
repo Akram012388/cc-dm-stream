@@ -146,8 +146,6 @@ impl<T> RingBuffer<T> {
 
 pub enum AppEvent {
     BusChanged,
-    Tick,
-    Input(crossterm::event::Event),
 }
 
 #[cfg(test)]
