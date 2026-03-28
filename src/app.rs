@@ -176,6 +176,7 @@ mod tests {
             to_session: to.to_string(),
             content: content.to_string(),
             priority: crate::types::Priority::Normal,
+            thread_id: None,
             created_at: Utc::now(),
         }
     }

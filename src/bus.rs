@@ -3,7 +3,7 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 
-use crate::types::{MessageEntry, Priority, SessionInfo, SessionStatus};
+use crate::types::{parse_thread_id, MessageEntry, Priority, SessionInfo, SessionStatus};
 
 pub fn open_bus(path: &Path) -> Result<Connection, rusqlite::Error> {
     Connection::open_with_flags(
@@ -68,6 +68,7 @@ pub fn read_pending_messages(conn: &Connection) -> Result<Vec<MessageEntry>, rus
     for row in rows {
         let (id, from_session, to_session, content, meta, created_at_str) = row?;
         let priority = Priority::from_meta_json(&meta);
+        let thread_id = parse_thread_id(&meta);
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or(now);
@@ -77,6 +78,7 @@ pub fn read_pending_messages(conn: &Connection) -> Result<Vec<MessageEntry>, rus
             to_session,
             content,
             priority,
+            thread_id,
             created_at,
         });
     }
