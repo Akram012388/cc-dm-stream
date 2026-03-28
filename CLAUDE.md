@@ -10,6 +10,7 @@ Live streaming TUI for the cc-dm coordination bus. Read-only observer — never 
 - **tokio** — async runtime
 - **rusqlite** — SQLite read-only access (WAL compatible)
 - **notify** — filesystem change detection (PollWatcher, 100ms interval)
+- **futures-util** — async stream extensions (StreamExt)
 - **clap** — CLI argument parsing
 
 ## Architecture
@@ -105,11 +106,40 @@ Computed locally from `last_seen` timestamps — does not wait for cc-dm to prun
 - Amber: `45s <= now - last_seen < 60s`
 - Red: `now - last_seen >= 60s`
 
-Prune alert fires when a session disappears from the sessions table entirely (deleted by cc-dm's 60s cleanup).
+Prune alert fires when a session disappears from the sessions table entirely (deleted by cc-dm's 60s cleanup). Reconnect alert fires when a previously pruned session ID reappears.
+
+### Session Name Resolution
+
+The feed header resolves `to_session` (raw session ID) to the display name using a `HashMap<String, String>` built from `App.sessions` at render time. Falls back to the raw ID for unknown/pruned sessions.
+
+### Reconnect Alerts
+
+`App.pruned_session_ids: HashSet<String>` tracks IDs of sessions that have been pruned. When a pruned ID reappears in `process_bus_update`, a green `[+] SESSION RECONNECTED` alert is emitted to the feed. New sessions (never pruned) do not trigger reconnect alerts.
+
+### Thread ID Labels
+
+`thread_id` is parsed from the `meta` JSON column using the same `starts_with` pattern as priority parsing. Stored as `Option<String>` on `MessageEntry`. When present, rendered as a muted `[thread-id]` label on the header line after the recipient.
+
+### Message Search
+
+Activated by `Ctrl+F` or `/`. Search bar appears at top of feed panel with real-time case-insensitive substring matching on message content.
+
+**Keybindings in search mode:**
+- Type to build query (real-time matching)
+- `Ctrl+N` — next match (wraps around)
+- `Ctrl+P` — previous match (wraps around)
+- `Enter` — jump to next match
+- `Esc` — exit search, restore auto-scroll
+
+**State:** `search_mode`, `search_query`, `search_matches` (feed entry indices), `search_match_index`. Search matches auto-update when new messages arrive during active search. Auto-scroll is paused during search. No regex, no fuzzy matching — plain case-insensitive substring (KISS).
 
 ### Ring Buffer
 
 Fixed capacity 1000. When full, oldest entry is evicted. This is the only place message history exists after cc-dm deletes delivered messages.
+
+### Roster Panel
+
+Fixed width `ROSTER_WIDTH = 30` (const in `ui/mod.rs`). Session entries show status dot, name, role (truncated if needed), and time since last heartbeat.
 
 ### Project Filtering
 
