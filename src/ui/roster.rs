@@ -85,7 +85,7 @@ pub fn draw(frame: &mut Frame, area: Rect, sessions: &[SessionInfo], project_fil
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::MUTED))
+        .border_style(Style::default().fg(theme::ORANGE))
         .style(Style::default().bg(theme::BG))
         .padding(ratatui::widgets::Padding::horizontal(1));
 

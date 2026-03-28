@@ -163,7 +163,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         .border_style(Style::default().fg(if app.search_mode {
             theme::BLUE
         } else {
-            theme::MUTED
+            theme::ORANGE
         }))
         .style(Style::default().bg(theme::BG))
         .padding(ratatui::widgets::Padding::horizontal(1));
