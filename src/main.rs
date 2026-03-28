@@ -49,10 +49,7 @@ fn refresh_welcome(app: &mut App, path: &std::path::Path) {
     if let Ok(conn) = open_bus(path) {
         app.stats.connected = true;
         if let Ok(projects) = list_projects(&conn) {
-            app.state = AppScreen::Welcome {
-                projects,
-                selected: 0,
-            };
+            app.refresh_welcome_projects(projects);
         }
     }
 }
