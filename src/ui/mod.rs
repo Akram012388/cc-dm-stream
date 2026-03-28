@@ -8,14 +8,14 @@ use ratatui::Frame;
 
 use crate::app::{App, AppScreen};
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.state {
         AppScreen::Welcome { .. } => welcome::draw(frame, app),
         AppScreen::Stream => draw_stream(frame, app),
     }
 }
 
-fn draw_stream(frame: &mut Frame, app: &App) {
+fn draw_stream(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     // Vertical split: main panels + status bar

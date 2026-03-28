@@ -24,6 +24,7 @@ pub struct App {
     pub stats: BusStats,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
+    pub visible_height: usize,
 }
 
 impl App {
@@ -45,6 +46,7 @@ impl App {
             },
             scroll_offset: 0,
             auto_scroll: true,
+            visible_height: 0,
         }
     }
 
