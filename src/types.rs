@@ -45,13 +45,19 @@ pub enum Priority {
 
 impl Priority {
     pub fn from_meta_json(json_str: &str) -> Self {
-        // Simple parsing: look for "priority":"<value>" in the JSON string
-        if let Some(start) = json_str.find("\"priority\"") {
-            let rest = &json_str[start..];
-            if rest.contains("\"urgent\"") {
+        // Find "priority":"<value>" and extract only the value immediately after the colon
+        if let Some(key_start) = json_str.find("\"priority\"") {
+            let after_key = &json_str[key_start + "\"priority\"".len()..];
+            // Skip optional whitespace and colon
+            let after_colon = match after_key.find(':') {
+                Some(i) => &after_key[i + 1..],
+                None => return Priority::Normal,
+            };
+            let trimmed = after_colon.trim_start();
+            if trimmed.starts_with("\"urgent\"") {
                 return Priority::Urgent;
             }
-            if rest.contains("\"low\"") {
+            if trimmed.starts_with("\"low\"") {
                 return Priority::Low;
             }
         }
@@ -109,6 +115,7 @@ pub struct RingBuffer<T> {
 
 impl<T> RingBuffer<T> {
     pub fn new(capacity: usize) -> Self {
+        assert!(capacity > 0, "RingBuffer capacity must be greater than 0");
         Self {
             items: VecDeque::with_capacity(capacity),
             capacity,
@@ -203,6 +210,12 @@ mod tests {
     // --- RingBuffer tests ---
 
     #[test]
+    #[should_panic(expected = "RingBuffer capacity must be greater than 0")]
+    fn ring_buffer_zero_capacity_panics() {
+        RingBuffer::<i32>::new(0);
+    }
+
+    #[test]
     fn ring_buffer_push_within_capacity() {
         let mut buf = RingBuffer::new(5);
         buf.push(1);
@@ -264,5 +277,11 @@ mod tests {
     fn priority_defaults_to_normal_on_unknown_value() {
         let json = r#"{"priority":"critical"}"#;
         assert_eq!(Priority::from_meta_json(json), Priority::Normal);
+    }
+
+    #[test]
+    fn priority_low_not_confused_by_later_urgent_key() {
+        let json = r#"{"priority":"low","escalation":"urgent"}"#;
+        assert_eq!(Priority::from_meta_json(json), Priority::Low);
     }
 }
