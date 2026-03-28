@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::app::App;
 use crate::theme;
-use crate::types::{FeedEntry, MessageEntry, Priority, PruneAlert};
+use crate::types::{FeedEntry, MessageEntry, Priority, PruneAlert, ReconnectAlert};
 
 /// Split a styled text into multiple Lines that fit within max_width.
 fn wrap_styled(text: &str, style: Style, max_width: usize) -> Vec<Line<'static>> {
@@ -103,6 +103,21 @@ pub fn prune_alert_lines(alert: &PruneAlert, width: usize) -> Vec<Line<'static>>
     lines
 }
 
+/// Build styled Lines for a reconnect alert, pre-wrapped to width.
+pub fn reconnect_alert_lines(alert: &ReconnectAlert, width: usize) -> Vec<Line<'static>> {
+    let text = format!(
+        "[+] SESSION RECONNECTED: {} ({})",
+        alert.session_name, alert.role
+    );
+    let style = Style::default()
+        .fg(theme::GREEN)
+        .add_modifier(Modifier::BOLD);
+
+    let mut lines = wrap_styled(&text, style, width);
+    lines.push(Line::from("")); // blank separator
+    lines
+}
+
 /// Build a session_id → display_name lookup from the app's sessions map.
 fn session_name_map(app: &App) -> HashMap<String, String> {
     app.sessions
@@ -119,6 +134,7 @@ pub fn build_feed_lines(app: &App, width: usize) -> Vec<Line<'static>> {
         .flat_map(|entry| match entry {
             FeedEntry::Message(msg) => message_lines(msg, width, &names),
             FeedEntry::PruneAlert(alert) => prune_alert_lines(alert, width),
+            FeedEntry::ReconnectAlert(alert) => reconnect_alert_lines(alert, width),
         })
         .collect()
 }
@@ -305,6 +321,19 @@ mod tests {
             lines.len() > 3,
             "long content should produce extra wrapped lines"
         );
+    }
+
+    #[test]
+    fn reconnect_alert_has_prefix_and_green() {
+        let alert = crate::types::ReconnectAlert {
+            session_name: "tester".to_string(),
+            role: "worker".to_string(),
+            timestamp: Utc::now(),
+        };
+        let lines = reconnect_alert_lines(&alert, 80);
+        assert!(lines.len() >= 2);
+        assert!(lines[0].spans[0].content.contains("[+]"));
+        assert_eq!(lines[0].spans[0].style.fg, Some(theme::GREEN));
     }
 
     #[test]

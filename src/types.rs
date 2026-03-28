@@ -87,12 +87,22 @@ pub struct PruneAlert {
     pub timestamp: DateTime<Utc>,
 }
 
+// --- Reconnect Alert ---
+
+#[derive(Debug, Clone)]
+pub struct ReconnectAlert {
+    pub session_name: String,
+    pub role: String,
+    pub timestamp: DateTime<Utc>,
+}
+
 // --- Feed ---
 
 #[derive(Debug, Clone)]
 pub enum FeedEntry {
     Message(MessageEntry),
     PruneAlert(PruneAlert),
+    ReconnectAlert(ReconnectAlert),
 }
 
 // --- Bus Stats ---
