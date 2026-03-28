@@ -29,6 +29,11 @@ pub struct App {
     pub auto_scroll: bool,
     pub visible_height: usize,
     pub total_feed_lines: usize,
+    // Search state
+    pub search_mode: bool,
+    pub search_query: String,
+    pub search_matches: Vec<usize>,
+    pub search_match_index: usize,
 }
 
 impl App {
@@ -53,6 +58,10 @@ impl App {
             auto_scroll: true,
             visible_height: 0,
             total_feed_lines: 0,
+            search_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_match_index: 0,
         }
     }
 
@@ -109,6 +118,73 @@ impl App {
         // Update stats
         self.stats.active_sessions = self.sessions.len();
         self.stats.connected = true;
+
+        // Re-run search if active
+        if self.search_mode && !self.search_query.is_empty() {
+            self.recompute_search_matches();
+        }
+    }
+
+    /// Enter search mode, pausing auto-scroll.
+    pub fn enter_search(&mut self) {
+        self.search_mode = true;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+        if self.auto_scroll {
+            self.scroll_offset = self.total_feed_lines.saturating_sub(self.visible_height);
+        }
+        self.auto_scroll = false;
+    }
+
+    /// Exit search mode, restoring auto-scroll.
+    pub fn exit_search(&mut self) {
+        self.search_mode = false;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+        self.auto_scroll = true;
+        self.scroll_offset = self.total_feed_lines.saturating_sub(self.visible_height);
+    }
+
+    /// Recompute search matches against current feed entries.
+    pub fn recompute_search_matches(&mut self) {
+        let query = self.search_query.to_lowercase();
+        self.search_matches = self
+            .feed
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| match entry {
+                FeedEntry::Message(msg) => msg.content.to_lowercase().contains(&query),
+                _ => false,
+            })
+            .map(|(i, _)| i)
+            .collect();
+        // Clamp match index
+        if self.search_matches.is_empty() {
+            self.search_match_index = 0;
+        } else {
+            self.search_match_index = self
+                .search_match_index
+                .min(self.search_matches.len() - 1);
+        }
+    }
+
+    /// Navigate to next search match (wraps around).
+    pub fn search_next(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_match_index = (self.search_match_index + 1) % self.search_matches.len();
+    }
+
+    /// Navigate to previous search match (wraps around).
+    pub fn search_prev(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_match_index = (self.search_match_index + self.search_matches.len() - 1)
+            % self.search_matches.len();
     }
 
     /// Update the welcome screen project list, preserving the current selection index.
@@ -385,5 +461,122 @@ mod tests {
         assert_eq!(app.stats.active_sessions, 2);
         assert_eq!(app.stats.messages_observed, 2);
         assert!(app.stats.connected);
+    }
+
+    // --- Search tests ---
+
+    #[test]
+    fn enter_search_activates_mode() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.auto_scroll = true;
+        app.enter_search();
+        assert!(app.search_mode);
+        assert!(!app.auto_scroll);
+        assert!(app.search_query.is_empty());
+    }
+
+    #[test]
+    fn exit_search_restores_auto_scroll() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.enter_search();
+        app.search_query = "test".to_string();
+        app.exit_search();
+        assert!(!app.search_mode);
+        assert!(app.auto_scroll);
+        assert!(app.search_query.is_empty());
+        assert!(app.search_matches.is_empty());
+    }
+
+    #[test]
+    fn search_finds_matching_messages() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(
+            vec![],
+            vec![
+                make_message(1, "a", "b", "hello world"),
+                make_message(2, "a", "b", "goodbye"),
+                make_message(3, "a", "b", "hello again"),
+            ],
+        );
+        app.enter_search();
+        app.search_query = "hello".to_string();
+        app.recompute_search_matches();
+        assert_eq!(app.search_matches.len(), 2);
+        assert_eq!(app.search_matches, vec![0, 2]);
+    }
+
+    #[test]
+    fn search_case_insensitive() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(vec![], vec![make_message(1, "a", "b", "Hello World")]);
+        app.enter_search();
+        app.search_query = "hello".to_string();
+        app.recompute_search_matches();
+        assert_eq!(app.search_matches.len(), 1);
+    }
+
+    #[test]
+    fn search_no_matches() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(vec![], vec![make_message(1, "a", "b", "hello")]);
+        app.enter_search();
+        app.search_query = "zzz".to_string();
+        app.recompute_search_matches();
+        assert!(app.search_matches.is_empty());
+    }
+
+    #[test]
+    fn search_next_wraps_around() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(
+            vec![],
+            vec![
+                make_message(1, "a", "b", "match"),
+                make_message(2, "a", "b", "match"),
+                make_message(3, "a", "b", "match"),
+            ],
+        );
+        app.enter_search();
+        app.search_query = "match".to_string();
+        app.recompute_search_matches();
+        assert_eq!(app.search_match_index, 0);
+        app.search_next();
+        assert_eq!(app.search_match_index, 1);
+        app.search_next();
+        assert_eq!(app.search_match_index, 2);
+        app.search_next(); // wraps
+        assert_eq!(app.search_match_index, 0);
+    }
+
+    #[test]
+    fn search_prev_wraps_around() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(
+            vec![],
+            vec![
+                make_message(1, "a", "b", "match"),
+                make_message(2, "a", "b", "match"),
+            ],
+        );
+        app.enter_search();
+        app.search_query = "match".to_string();
+        app.recompute_search_matches();
+        assert_eq!(app.search_match_index, 0);
+        app.search_prev(); // wraps to last
+        assert_eq!(app.search_match_index, 1);
+    }
+
+    #[test]
+    fn new_message_during_search_updates_matches() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(vec![], vec![make_message(1, "a", "b", "hello")]);
+        app.enter_search();
+        app.search_query = "hello".to_string();
+        app.recompute_search_matches();
+        assert_eq!(app.search_matches.len(), 1);
+
+        // New message arrives while searching
+        app.process_bus_update(vec![], vec![make_message(2, "a", "b", "hello again")]);
+        assert_eq!(app.search_matches.len(), 2);
     }
 }
