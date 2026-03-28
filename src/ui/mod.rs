@@ -8,6 +8,9 @@ use ratatui::Frame;
 
 use crate::app::{App, AppScreen};
 
+/// Fixed width for the session roster panel.
+pub const ROSTER_WIDTH: u16 = 30;
+
 pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.state {
         AppScreen::Welcome { .. } => welcome::draw(frame, app),
@@ -27,7 +30,7 @@ fn draw_stream(frame: &mut Frame, app: &mut App) {
 
     // Horizontal split: roster (fixed) + feed (flex)
     let horizontal = Layout::horizontal([
-        Constraint::Length(25), // roster
+        Constraint::Length(ROSTER_WIDTH), // roster
         Constraint::Min(20),    // feed
     ])
     .split(vertical[0]);
