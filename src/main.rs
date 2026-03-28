@@ -1,6 +1,7 @@
 mod bus;
 mod theme;
 mod types;
+mod watcher;
 
 use clap::Parser;
 
