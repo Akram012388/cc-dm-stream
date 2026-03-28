@@ -40,7 +40,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     .split(inner);
 
     // Title
-    let title = Paragraph::new("cc-dm-stream v0.1.0")
+    let title = Paragraph::new("cc-dm-stream v0.1.9")
         .alignment(Alignment::Center)
         .style(Style::default().fg(theme::FG).add_modifier(Modifier::BOLD));
     frame.render_widget(title, chunks[0]);

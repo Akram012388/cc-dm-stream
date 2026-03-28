@@ -149,6 +149,28 @@
 
 ---
 
+## ADR-15: Message Search — KISS Substring Matching
+
+**Decision:** Search uses plain case-insensitive substring matching. No regex, no fuzzy matching, no ranking.
+
+**Context:** The feed is a live stream of coordination messages. Search is for quick recall ("did someone mention X?"), not document retrieval. Regex adds complexity (escaping, error handling, performance) for a feature that 99% of the time is used as a plain text filter. Fuzzy matching adds ranking ambiguity.
+
+**Keybinding rationale:** `Ctrl+F` (familiar) and `/` (vim convention) both enter search mode. `Ctrl+N/Ctrl+P` navigate matches during typing without consuming the character — `n/N` would conflict with typing 'n' in the query. `Esc` exits entirely (no two-phase exit). `Enter` jumps to next match (vim `/` + `n` muscle memory).
+
+**Consequence:** Search mode is a single boolean state. Query updates trigger full re-scan of the ring buffer (max 1000 entries — instant). Match indices are feed entry positions, not visual line positions, so scroll-to-match requires entry-to-line mapping (deferred to future iteration). New messages during search auto-update the match list via `recompute_search_matches` in `process_bus_update`.
+
+---
+
+## ADR-16: Reconnect Alerts
+
+**Decision:** Track pruned session IDs. When a previously pruned ID reappears, emit a green `[+] SESSION RECONNECTED` alert in the feed.
+
+**Context:** A pruned session that reappears is a meaningful event — the session was dead and came back. This is actionable information (e.g., a crashed worker recovered). New sessions that were never pruned should NOT trigger this alert.
+
+**Consequence:** `pruned_session_ids: HashSet<String>` on App. Prune adds to set, reconnect removes. The set grows unboundedly if sessions keep cycling, but in practice cc-dm session IDs are unique UUIDs and the set stays small.
+
+---
+
 ## Architecture Overview
 
 ### Tech Stack
