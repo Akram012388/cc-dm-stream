@@ -9,7 +9,7 @@ Live streaming TUI for the cc-dm coordination bus. Read-only observer — never 
 - **crossterm** — terminal backend
 - **tokio** — async runtime
 - **rusqlite** — SQLite read-only access (WAL compatible)
-- **notify** — filesystem event watching (kqueue on macOS, inotify on Linux)
+- **notify** — filesystem change detection (PollWatcher, 100ms interval)
 - **clap** — CLI argument parsing
 
 ## Architecture
@@ -70,7 +70,7 @@ On every filesystem event:
 3. New IDs → capture into ring buffer, add to known set
 4. IDs in known set but missing from query → message was delivered (no action needed for display)
 
-This works because filesystem notifications arrive in <10ms, and cc-dm's poll loop deletes messages every ~500ms. The 490ms window is comfortable.
+This works because the PollWatcher checks for changes every 100ms, and cc-dm's poll loop deletes messages every ~500ms. The 400ms window is comfortable.
 
 ### Session Roster Diffing
 
@@ -86,7 +86,7 @@ On every filesystem event:
 Two tokio tasks communicating via `mpsc` channel:
 
 **Watcher task:**
-- `notify` watches `~/.cc-dm/` directory
+- `notify::PollWatcher` polls `~/.cc-dm/` directory every 100ms
 - Filters events to bus-related files (`bus.db`, `bus.db-wal`, `bus.db-shm`)
 - On relevant event: reads SQLite, diffs state, sends typed events through channel
 
@@ -139,7 +139,7 @@ All queries to sessions and messages are filtered by the selected project. Sessi
 
 1. Never write to the bus — no INSERT, UPDATE, DELETE, PRAGMA writes
 2. Never register as a session or send heartbeats
-3. Never poll on a timer — use filesystem events exclusively
+3. Never set the poll interval above 200ms — must read before cc-dm's 500ms deletion cycle
 4. Never assume messages persist — they are deleted within ~500ms
 5. Never join `from_session` against `sessions.id` — it's a display name, not an ID
 6. Never auto-select a project in the welcome screen — always require manual selection
