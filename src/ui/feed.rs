@@ -5,6 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+use std::collections::HashMap;
+
 use crate::app::App;
 use crate::theme;
 use crate::types::{FeedEntry, MessageEntry, Priority, PruneAlert};
@@ -22,7 +24,12 @@ fn wrap_styled(text: &str, style: Style, max_width: usize) -> Vec<Line<'static>>
 }
 
 /// Build styled Lines for a message, pre-wrapped to width.
-pub fn message_lines(msg: &MessageEntry, width: usize) -> Vec<Line<'static>> {
+/// `session_names` maps session IDs to display names for resolving `to_session`.
+pub fn message_lines(
+    msg: &MessageEntry,
+    width: usize,
+    session_names: &HashMap<String, String>,
+) -> Vec<Line<'static>> {
     let ts = msg
         .created_at
         .with_timezone(&chrono::Local)
@@ -34,6 +41,11 @@ pub fn message_lines(msg: &MessageEntry, width: usize) -> Vec<Line<'static>> {
         _ => theme::FG,
     };
 
+    let to_display = session_names
+        .get(&msg.to_session)
+        .cloned()
+        .unwrap_or_else(|| msg.to_session.clone());
+
     let header = Line::from(vec![
         Span::styled(format!("{} ", ts), Style::default().fg(theme::MUTED)),
         Span::styled(
@@ -43,7 +55,7 @@ pub fn message_lines(msg: &MessageEntry, width: usize) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!(" \u{2192} {}:", msg.to_session),
+            format!(" \u{2192} {}:", to_display),
             Style::default().fg(theme::MUTED),
         ),
     ]);
@@ -91,12 +103,21 @@ pub fn prune_alert_lines(alert: &PruneAlert, width: usize) -> Vec<Line<'static>>
     lines
 }
 
+/// Build a session_id → display_name lookup from the app's sessions map.
+fn session_name_map(app: &App) -> HashMap<String, String> {
+    app.sessions
+        .iter()
+        .map(|(id, info)| (id.clone(), info.name.clone()))
+        .collect()
+}
+
 /// Build all visual lines for the entire feed, pre-wrapped to width.
 pub fn build_feed_lines(app: &App, width: usize) -> Vec<Line<'static>> {
+    let names = session_name_map(app);
     app.feed
         .iter()
         .flat_map(|entry| match entry {
-            FeedEntry::Message(msg) => message_lines(msg, width),
+            FeedEntry::Message(msg) => message_lines(msg, width, &names),
             FeedEntry::PruneAlert(alert) => prune_alert_lines(alert, width),
         })
         .collect()
@@ -210,10 +231,17 @@ mod tests {
         }
     }
 
+    fn make_session_names() -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        map.insert("session-b".to_string(), "bob".to_string());
+        map
+    }
+
     #[test]
     fn message_format_has_header_content_blank() {
+        let names = make_session_names();
         let msg = make_msg(1, "alice", "session-b", "hello world", Priority::Normal);
-        let lines = message_lines(&msg, 80);
+        let lines = message_lines(&msg, 80, &names);
         assert!(lines.len() >= 3); // header, content, blank
         assert!(lines[0].spans[0].content.contains(':'));
         assert_eq!(*lines[0].spans[1].content, *"alice");
@@ -222,17 +250,56 @@ mod tests {
             .iter()
             .map(|s| s.content.to_string())
             .collect();
-        assert!(header_text.contains("session-b"));
+        assert!(header_text.contains("bob"));
         assert_eq!(*lines[1].spans[0].content, *"  ");
         assert!(lines[1].spans[1].content.contains("hello world"));
         assert!(lines.last().unwrap().spans.is_empty());
     }
 
     #[test]
+    fn to_session_resolved_to_display_name() {
+        let names = make_session_names();
+        let msg = make_msg(1, "alice", "session-b", "hi", Priority::Normal);
+        let lines = message_lines(&msg, 80, &names);
+        let header_text: String = lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        assert!(
+            header_text.contains("bob"),
+            "header should show resolved name 'bob', got: {}",
+            header_text
+        );
+        assert!(
+            !header_text.contains("session-b"),
+            "header should NOT show raw ID when resolved"
+        );
+    }
+
+    #[test]
+    fn to_session_fallback_to_raw_id() {
+        let names = std::collections::HashMap::new(); // empty — no resolution
+        let msg = make_msg(1, "alice", "unknown-id", "hi", Priority::Normal);
+        let lines = message_lines(&msg, 80, &names);
+        let header_text: String = lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        assert!(
+            header_text.contains("unknown-id"),
+            "header should fallback to raw ID, got: {}",
+            header_text
+        );
+    }
+
+    #[test]
     fn long_content_wraps_to_width() {
+        let names = make_session_names();
         let long_content = "a".repeat(100);
         let msg = make_msg(1, "alice", "session-b", &long_content, Priority::Normal);
-        let lines = message_lines(&msg, 30);
+        let lines = message_lines(&msg, 30, &names);
         // content_width = 28, 100/28 = 4 content lines + header + blank = 6+
         assert!(
             lines.len() > 3,
@@ -256,8 +323,9 @@ mod tests {
 
     #[test]
     fn urgent_message_has_red_content() {
+        let names = make_session_names();
         let msg = make_msg(1, "alice", "session-b", "URGENT!", Priority::Urgent);
-        let lines = message_lines(&msg, 80);
+        let lines = message_lines(&msg, 80, &names);
         assert_eq!(lines[1].spans[1].style.fg, Some(theme::RED));
     }
 
