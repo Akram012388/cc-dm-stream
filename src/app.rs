@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
-use crate::types::{BusStats, FeedEntry, MessageEntry, PruneAlert, RingBuffer, SessionInfo};
+use crate::types::{
+    BusStats, FeedEntry, MessageEntry, PruneAlert, ReconnectAlert, RingBuffer, SessionInfo,
+};
 
 const FEED_CAPACITY: usize = 1000;
 
@@ -21,6 +23,7 @@ pub struct App {
     pub sessions: HashMap<String, SessionInfo>,
     pub feed: RingBuffer<FeedEntry>,
     pub known_message_ids: HashSet<i64>,
+    pub pruned_session_ids: HashSet<String>,
     pub stats: BusStats,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
@@ -39,6 +42,7 @@ impl App {
             sessions: HashMap::new(),
             feed: RingBuffer::new(FEED_CAPACITY),
             known_message_ids: HashSet::new(),
+            pruned_session_ids: HashSet::new(),
             stats: BusStats {
                 active_sessions: 0,
                 messages_observed: 0,
@@ -77,11 +81,20 @@ impl App {
                 last_seen_ago_secs: ago,
                 timestamp: now,
             }));
+            self.pruned_session_ids.insert(session.id.clone());
             self.sessions.remove(&session.id);
         }
 
-        // Update/add sessions
+        // Update/add sessions — detect reconnects
         for session in sessions {
+            if self.pruned_session_ids.remove(&session.id) {
+                self.feed
+                    .push(FeedEntry::ReconnectAlert(ReconnectAlert {
+                        session_name: session.name.clone(),
+                        role: session.role.clone(),
+                        timestamp: now,
+                    }));
+            }
             self.sessions.insert(session.id.clone(), session);
         }
 
@@ -214,6 +227,48 @@ mod tests {
             }
             _ => panic!("expected PruneAlert"),
         }
+    }
+
+    #[test]
+    fn pruned_session_reconnect_emits_alert() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+
+        // Session appears
+        let sessions = vec![make_session("s1", "tester", "worker", "myapp", 5)];
+        app.process_bus_update(sessions, vec![]);
+
+        // Session disappears (pruned)
+        app.process_bus_update(vec![], vec![]);
+        assert!(app.pruned_session_ids.contains("s1"));
+
+        // Session reappears (reconnect)
+        let sessions = vec![make_session("s1", "tester", "worker", "myapp", 2)];
+        app.process_bus_update(sessions, vec![]);
+
+        // Should have PruneAlert + ReconnectAlert in feed
+        let entries: Vec<_> = app.feed.iter().collect();
+        assert_eq!(entries.len(), 2);
+        match &entries[1] {
+            FeedEntry::ReconnectAlert(alert) => {
+                assert_eq!(alert.session_name, "tester");
+                assert_eq!(alert.role, "worker");
+            }
+            _ => panic!("expected ReconnectAlert, got {:?}", entries[1]),
+        }
+        // Pruned set should be cleared for this ID
+        assert!(!app.pruned_session_ids.contains("s1"));
+    }
+
+    #[test]
+    fn new_session_does_not_emit_reconnect_alert() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+
+        // Brand new session (never pruned) — should NOT emit ReconnectAlert
+        let sessions = vec![make_session("s1", "alice", "worker", "myapp", 5)];
+        app.process_bus_update(sessions, vec![]);
+
+        let entries: Vec<_> = app.feed.iter().collect();
+        assert!(entries.is_empty(), "new session should not emit any alert");
     }
 
     #[test]
