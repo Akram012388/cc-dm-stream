@@ -1,3 +1,4 @@
+mod bus;
 mod theme;
 mod types;
 
