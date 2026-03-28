@@ -126,7 +126,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .title(" Feed ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::MUTED))
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::BG))
+        .padding(ratatui::widgets::Padding::horizontal(1));
 
     let inner = block.inner(area);
     let inner_height = inner.height as usize;

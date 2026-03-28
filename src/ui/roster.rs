@@ -39,7 +39,8 @@ pub fn draw(frame: &mut Frame, area: Rect, sessions: &[SessionInfo]) {
         .title(" Roster ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::MUTED))
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::BG))
+        .padding(ratatui::widgets::Padding::horizontal(1));
 
     let items: Vec<ListItem> = sessions
         .iter()
