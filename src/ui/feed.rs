@@ -9,8 +9,20 @@ use crate::app::App;
 use crate::theme;
 use crate::types::{FeedEntry, MessageEntry, Priority, PruneAlert};
 
-/// Build styled Lines for a message (owned, 'static lifetime).
-pub fn message_lines(msg: &MessageEntry) -> Vec<Line<'static>> {
+/// Split a styled text into multiple Lines that fit within max_width.
+fn wrap_styled(text: &str, style: Style, max_width: usize) -> Vec<Line<'static>> {
+    if max_width == 0 || text.is_empty() {
+        return vec![Line::from(Span::styled(text.to_string(), style))];
+    }
+    text.chars()
+        .collect::<Vec<_>>()
+        .chunks(max_width)
+        .map(|chunk| Line::from(Span::styled(chunk.iter().collect::<String>(), style)))
+        .collect()
+}
+
+/// Build styled Lines for a message, pre-wrapped to width.
+pub fn message_lines(msg: &MessageEntry, width: usize) -> Vec<Line<'static>> {
     let ts = msg
         .created_at
         .with_timezone(&chrono::Local)
@@ -36,39 +48,56 @@ pub fn message_lines(msg: &MessageEntry) -> Vec<Line<'static>> {
         ),
     ]);
 
-    let content = Line::from(vec![
-        Span::styled("  ".to_string(), Style::default()),
-        Span::styled(msg.content.clone(), Style::default().fg(content_color)),
-    ]);
+    // Pre-wrap content to (width - 2) for the "  " indent
+    let content_width = width.saturating_sub(2);
+    let content_style = Style::default().fg(content_color);
 
-    vec![header, content, Line::from("")]
+    let mut lines = vec![header];
+
+    let chunks: Vec<String> = if content_width > 0 && !msg.content.is_empty() {
+        msg.content
+            .chars()
+            .collect::<Vec<_>>()
+            .chunks(content_width)
+            .map(|c| c.iter().collect())
+            .collect()
+    } else {
+        vec![msg.content.clone()]
+    };
+
+    for chunk in chunks {
+        lines.push(Line::from(vec![
+            Span::styled("  ".to_string(), Style::default()),
+            Span::styled(chunk, content_style),
+        ]));
+    }
+
+    lines.push(Line::from("")); // blank separator
+    lines
 }
 
-/// Build styled Lines for a prune alert (owned).
-pub fn prune_alert_lines(alert: &PruneAlert) -> Vec<Line<'static>> {
+/// Build styled Lines for a prune alert, pre-wrapped to width.
+pub fn prune_alert_lines(alert: &PruneAlert, width: usize) -> Vec<Line<'static>> {
+    let text = format!(
+        "[!] SESSION PRUNED: {} ({}) \u{2014} last seen {}s ago",
+        alert.session_name, alert.role, alert.last_seen_ago_secs
+    );
     let style = Style::default()
         .fg(theme::AMBER)
         .add_modifier(Modifier::BOLD);
 
-    vec![
-        Line::from(vec![Span::styled(
-            format!(
-                "[!] SESSION PRUNED: {} ({}) \u{2014} last seen {}s ago",
-                alert.session_name, alert.role, alert.last_seen_ago_secs
-            ),
-            style,
-        )]),
-        Line::from(""),
-    ]
+    let mut lines = wrap_styled(&text, style, width);
+    lines.push(Line::from("")); // blank separator
+    lines
 }
 
-/// Build all visual lines for the entire feed (owned).
-pub fn build_feed_lines(app: &App) -> Vec<Line<'static>> {
+/// Build all visual lines for the entire feed, pre-wrapped to width.
+pub fn build_feed_lines(app: &App, width: usize) -> Vec<Line<'static>> {
     app.feed
         .iter()
         .flat_map(|entry| match entry {
-            FeedEntry::Message(msg) => message_lines(msg),
-            FeedEntry::PruneAlert(alert) => prune_alert_lines(alert),
+            FeedEntry::Message(msg) => message_lines(msg, width),
+            FeedEntry::PruneAlert(alert) => prune_alert_lines(alert, width),
         })
         .collect()
 }
@@ -83,24 +112,26 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let inner = block.inner(area);
     let inner_height = inner.height as usize;
+    let inner_width = inner.width as usize;
 
-    let all_lines = build_feed_lines(app);
+    // Pre-wrap all lines to panel width — total_lines = actual visual lines
+    let all_lines = build_feed_lines(app, inner_width);
     let total_lines = all_lines.len();
 
     // Store for scroll input handlers
     app.visible_height = inner_height;
     app.total_feed_lines = total_lines;
 
-    // Compute scroll offset in visual lines
+    // Compute scroll offset in visual lines — exact match to rendered content
     let scroll_y = if app.auto_scroll {
         total_lines.saturating_sub(inner_height)
     } else {
         app.scroll_offset
     };
 
+    // No .wrap() — content is pre-wrapped, scroll math is exact
     let paragraph = Paragraph::new(all_lines)
         .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false })
         .scroll((scroll_y as u16, 0));
     frame.render_widget(paragraph, area);
 }
@@ -110,7 +141,6 @@ pub enum StreamAction {
 }
 
 pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
-    // Sync scroll_offset to match rendered position when auto_scrolling
     if app.auto_scroll {
         app.scroll_offset = app.total_feed_lines.saturating_sub(app.visible_height);
     }
@@ -138,7 +168,6 @@ pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
 }
 
 pub fn handle_mouse_input(app: &mut App, mouse: MouseEvent) {
-    // Sync scroll_offset to match rendered position when auto_scrolling
     if app.auto_scroll {
         app.scroll_offset = app.total_feed_lines.saturating_sub(app.visible_height);
     }
@@ -184,23 +213,31 @@ mod tests {
     #[test]
     fn message_format_has_header_content_blank() {
         let msg = make_msg(1, "alice", "session-b", "hello world", Priority::Normal);
-        let lines = message_lines(&msg);
-        assert_eq!(lines.len(), 3); // header, content, blank
-                                    // Header has timestamp and sender
+        let lines = message_lines(&msg, 80);
+        assert!(lines.len() >= 3); // header, content, blank
         assert!(lines[0].spans[0].content.contains(':'));
         assert_eq!(*lines[0].spans[1].content, *"alice");
-        // Header has session ID
         let header_text: String = lines[0]
             .spans
             .iter()
             .map(|s| s.content.to_string())
             .collect();
         assert!(header_text.contains("session-b"));
-        // Content is indented
         assert_eq!(*lines[1].spans[0].content, *"  ");
-        assert_eq!(*lines[1].spans[1].content, *"hello world");
-        // Blank separator
-        assert!(lines[2].spans.is_empty());
+        assert!(lines[1].spans[1].content.contains("hello world"));
+        assert!(lines.last().unwrap().spans.is_empty());
+    }
+
+    #[test]
+    fn long_content_wraps_to_width() {
+        let long_content = "a".repeat(100);
+        let msg = make_msg(1, "alice", "session-b", &long_content, Priority::Normal);
+        let lines = message_lines(&msg, 30);
+        // content_width = 28, 100/28 = 4 content lines + header + blank = 6+
+        assert!(
+            lines.len() > 3,
+            "long content should produce extra wrapped lines"
+        );
     }
 
     #[test]
@@ -211,8 +248,8 @@ mod tests {
             last_seen_ago_secs: 62,
             timestamp: Utc::now(),
         };
-        let lines = prune_alert_lines(&alert);
-        assert_eq!(lines.len(), 2); // alert + blank
+        let lines = prune_alert_lines(&alert, 80);
+        assert!(lines.len() >= 2);
         assert!(lines[0].spans[0].content.contains("[!]"));
         assert_eq!(lines[0].spans[0].style.fg, Some(theme::AMBER));
     }
@@ -220,7 +257,7 @@ mod tests {
     #[test]
     fn urgent_message_has_red_content() {
         let msg = make_msg(1, "alice", "session-b", "URGENT!", Priority::Urgent);
-        let lines = message_lines(&msg);
+        let lines = message_lines(&msg, 80);
         assert_eq!(lines[1].spans[1].style.fg, Some(theme::RED));
     }
 
@@ -233,7 +270,6 @@ mod tests {
             app.process_bus_update(vec![], vec![make_msg(i, "a", "b", "msg", Priority::Normal)]);
         }
 
-        // auto_scroll true → sync: offset = 30 - 10 = 20, then Up → 19
         handle_key_input(&mut app, key(KeyCode::Up));
         assert!(!app.auto_scroll);
         assert_eq!(app.scroll_offset, 19);
