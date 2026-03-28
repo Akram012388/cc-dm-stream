@@ -160,6 +160,11 @@ pub enum StreamAction {
 pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
     let feed_len = app.feed.len();
 
+    // Sync scroll_offset when transitioning out of auto_scroll
+    if app.auto_scroll {
+        app.scroll_offset = feed_len.saturating_sub(1);
+    }
+
     match key.code {
         KeyCode::Char('q') => return Some(StreamAction::Quit),
         KeyCode::Up | KeyCode::Char('k') => {
@@ -168,8 +173,6 @@ pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
         }
         KeyCode::Down | KeyCode::Char('j') => {
             app.scroll_offset = (app.scroll_offset + 1).min(feed_len.saturating_sub(1));
-            // Check if we've scrolled to bottom (approximate — exact depends on visible height)
-            // We'll set auto_scroll if offset reaches near the end
             if app.scroll_offset >= feed_len.saturating_sub(1) {
                 app.auto_scroll = true;
             }
@@ -185,6 +188,11 @@ pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
 
 pub fn handle_mouse_input(app: &mut App, mouse: MouseEvent) {
     let feed_len = app.feed.len();
+
+    // Sync scroll_offset when transitioning out of auto_scroll
+    if app.auto_scroll {
+        app.scroll_offset = feed_len.saturating_sub(1);
+    }
 
     match mouse.kind {
         MouseEventKind::ScrollUp => {
