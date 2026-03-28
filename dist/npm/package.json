@@ -1,0 +1,22 @@
+{
+  "name": "cc-dm-stream",
+  "version": "0.1.9",
+  "description": "Live streaming TUI for the cc-dm coordination bus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Akram012388/cc-dm-stream"
+  },
+  "keywords": ["cc-dm", "tui", "terminal", "claude-code"],
+  "bin": {
+    "cc-dm-stream": "bin/cc-dm-stream"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "os": ["darwin", "linux"],
+  "cpu": ["arm64", "x64"],
+  "engines": {
+    "node": ">=14"
+  }
+}
