@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use clap::Parser;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
@@ -117,26 +116,17 @@ async fn main() -> io::Result<()> {
         }
     }
 
-    // Start watcher on bus directory (if it exists)
     let (tx, mut rx) = mpsc::channel::<AppEvent>(32);
-    let _watcher = if bd.exists() {
-        start_watcher(bd.to_path_buf(), tx.clone()).ok()
-    } else {
-        None
-    };
 
-    // Terminal setup
-    enable_raw_mode()?;
-    execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    execute!(stdout(), crossterm::event::EnableMouseCapture)?;
+    // Terminal setup — ratatui::init() handles raw mode + alternate screen
     let mut terminal = ratatui::init();
+    execute!(stdout(), crossterm::event::EnableMouseCapture)?;
 
     let result = run_loop(&mut terminal, &mut app, &mut rx, &bp, &bd, tx).await;
 
     // Terminal teardown (always)
     execute!(stdout(), crossterm::event::DisableMouseCapture)?;
     ratatui::restore();
-    disable_raw_mode()?;
 
     result
 }
@@ -152,12 +142,9 @@ async fn run_loop(
     let mut ticker = interval(Duration::from_secs(1));
     let mut event_stream = EventStream::new();
 
-    // Track if we have a watcher (we might need to start one if bus_dir appears)
+    // Start watcher on bus directory (if it exists)
     let mut _watcher_handle = if bd.exists() {
-        // Watcher already started in main, but we can't pass it through easily.
-        // The watcher from main() is still alive. This is just for the case where
-        // bus_dir doesn't exist at launch and appears later.
-        None
+        start_watcher(bd.to_path_buf(), tx.clone()).ok()
     } else {
         None
     };
