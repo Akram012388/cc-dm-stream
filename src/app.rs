@@ -98,6 +98,20 @@ impl App {
         self.stats.connected = true;
     }
 
+    /// Update the welcome screen project list, preserving the current selection index.
+    pub fn refresh_welcome_projects(&mut self, projects: Vec<(String, usize)>) {
+        let prev_selected = match &self.state {
+            AppScreen::Welcome { selected, .. } => *selected,
+            _ => 0,
+        };
+        // Max valid index = projects.len() (the "all projects" virtual entry)
+        let max_index = projects.len();
+        self.state = AppScreen::Welcome {
+            projects,
+            selected: prev_selected.min(max_index),
+        };
+    }
+
     pub fn apply_project_filter<'a>(&self, sessions: &'a [SessionInfo]) -> Vec<&'a SessionInfo> {
         match &self.project_filter {
             None => sessions.iter().collect(),

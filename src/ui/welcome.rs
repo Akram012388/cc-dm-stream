@@ -247,6 +247,57 @@ mod tests {
     }
 
     #[test]
+    fn selection_clamped_when_list_shrinks() {
+        let projects = vec![
+            ("alpha".to_string(), 3),
+            ("beta".to_string(), 2),
+            ("gamma".to_string(), 1),
+        ];
+        let mut app = app_with_projects(projects);
+
+        // Move selection to index 2 (gamma)
+        handle_input(&mut app, key(KeyCode::Down)); // -> 1
+        handle_input(&mut app, key(KeyCode::Down)); // -> 2
+        match &app.state {
+            AppScreen::Welcome { selected, .. } => assert_eq!(*selected, 2),
+            _ => panic!("expected Welcome"),
+        }
+
+        // Simulate refresh with smaller list — only 1 project now
+        // selected=2 should clamp to max valid index (1: the "all projects" entry)
+        let new_projects = vec![("alpha".to_string(), 3)];
+        app.refresh_welcome_projects(new_projects);
+        match &app.state {
+            AppScreen::Welcome {
+                selected,
+                projects,
+            } => {
+                assert_eq!(projects.len(), 1);
+                // max valid index = projects.len() = 1 (the "all projects" virtual entry)
+                assert_eq!(*selected, 1);
+            }
+            _ => panic!("expected Welcome"),
+        }
+    }
+
+    #[test]
+    fn selection_preserved_when_list_stays_same_size() {
+        let projects = vec![("alpha".to_string(), 3), ("beta".to_string(), 2)];
+        let mut app = app_with_projects(projects);
+
+        // Move to index 1 (beta)
+        handle_input(&mut app, key(KeyCode::Down));
+
+        // Refresh with same-length list
+        let new_projects = vec![("alpha".to_string(), 4), ("beta".to_string(), 1)];
+        app.refresh_welcome_projects(new_projects);
+        match &app.state {
+            AppScreen::Welcome { selected, .. } => assert_eq!(*selected, 1),
+            _ => panic!("expected Welcome"),
+        }
+    }
+
+    #[test]
     fn enter_on_all_projects_returns_none() {
         let projects = vec![("myapp".to_string(), 5)];
         let mut app = app_with_projects(projects);
