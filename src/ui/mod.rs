@@ -36,7 +36,12 @@ fn draw_stream(frame: &mut Frame, app: &App) {
     let mut sessions: Vec<_> = app.sessions.values().cloned().collect();
     sessions.sort_by(|a, b| a.name.cmp(&b.name));
 
-    roster::draw(frame, horizontal[0], &sessions);
+    roster::draw(
+        frame,
+        horizontal[0],
+        &sessions,
+        app.project_filter.as_deref(),
+    );
     feed::draw(frame, horizontal[1], app);
     status_bar::draw(frame, vertical[1], &app.stats);
 }
