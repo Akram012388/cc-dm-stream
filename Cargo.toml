@@ -4,6 +4,7 @@ version = "0.1.9"
 edition = "2021"
 description = "Live streaming TUI for the cc-dm coordination bus"
 license = "MIT"
+readme = "README.md"
 repository = "https://github.com/Akram012388/cc-dm-stream"
 keywords = ["cc-dm", "tui", "terminal", "claude-code"]
 categories = ["command-line-utilities"]
