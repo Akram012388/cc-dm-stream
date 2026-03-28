@@ -9,15 +9,57 @@ use crate::app::App;
 use crate::theme;
 use crate::types::{FeedEntry, MessageEntry, Priority, PruneAlert};
 
-/// Build a styled Line for a message feed entry.
-pub fn message_line(msg: &MessageEntry) -> Line<'_> {
+const CONT_INDENT: &str = "           "; // 11 chars, aligns with after [HH:MM:SS]
+
+/// Split text into chunks that fit within max_width.
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 || text.is_empty() {
+        return vec![text.to_string()];
+    }
+    text.chars()
+        .collect::<Vec<_>>()
+        .chunks(max_width)
+        .map(|c| c.iter().collect())
+        .collect()
+}
+
+/// Build styled Lines for a message feed entry, wrapping content to width.
+pub fn message_lines(msg: &MessageEntry, width: usize) -> Vec<Line<'_>> {
     let ts = msg.created_at.format("[%H:%M:%S]").to_string();
     let content_color = match msg.priority {
         Priority::Urgent => theme::RED,
         _ => theme::FG,
     };
 
-    Line::from(vec![
+    let prefix = format!("{} {} \u{2192} {}: ", ts, msg.from_session, msg.to_session);
+    let prefix_len = prefix.len();
+
+    let first_line_width = width.saturating_sub(prefix_len);
+    let cont_width = width.saturating_sub(CONT_INDENT.len());
+
+    if first_line_width == 0 || msg.content.len() <= first_line_width {
+        // Fits on one line
+        return vec![Line::from(vec![
+            Span::styled(format!("{} ", ts), Style::default().fg(theme::MUTED)),
+            Span::styled(
+                &msg.from_session,
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" \u{2192} {}: ", msg.to_session),
+                Style::default().fg(theme::MUTED),
+            ),
+            Span::styled(&msg.content, Style::default().fg(content_color)),
+        ])];
+    }
+
+    let content_chars: Vec<char> = msg.content.chars().collect();
+    let first_chunk: String = content_chars[..first_line_width].iter().collect();
+    let rest: String = content_chars[first_line_width..].iter().collect();
+
+    let mut lines = vec![Line::from(vec![
         Span::styled(format!("{} ", ts), Style::default().fg(theme::MUTED)),
         Span::styled(
             &msg.from_session,
@@ -29,28 +71,53 @@ pub fn message_line(msg: &MessageEntry) -> Line<'_> {
             format!(" \u{2192} {}: ", msg.to_session),
             Style::default().fg(theme::MUTED),
         ),
-        Span::styled(&msg.content, Style::default().fg(content_color)),
-    ])
+        Span::styled(first_chunk, Style::default().fg(content_color)),
+    ])];
+
+    for chunk in wrap_text(&rest, cont_width) {
+        lines.push(Line::from(vec![
+            Span::styled(CONT_INDENT.to_string(), Style::default()),
+            Span::styled(chunk, Style::default().fg(content_color)),
+        ]));
+    }
+
+    lines
 }
 
-/// Build a styled Line for a prune alert.
+/// Build a styled Line for a message (single-line, for tests).
+pub fn message_line(msg: &MessageEntry) -> Line<'_> {
+    message_lines(msg, usize::MAX).into_iter().next().unwrap()
+}
+
+/// Build styled Lines for a prune alert, wrapping to width.
+pub fn prune_alert_lines(alert: &PruneAlert, width: usize) -> Vec<Line<'_>> {
+    let text = format!(
+        "[!] SESSION PRUNED: {} ({}) \u{2014} last seen {}s ago",
+        alert.session_name, alert.role, alert.last_seen_ago_secs
+    );
+    let style = Style::default()
+        .fg(theme::AMBER)
+        .add_modifier(Modifier::BOLD);
+
+    wrap_text(&text, width)
+        .into_iter()
+        .map(|chunk| Line::from(vec![Span::styled(chunk, style)]))
+        .collect()
+}
+
+/// Build a styled Line for a prune alert (single-line, for tests).
 pub fn prune_alert_line(alert: &PruneAlert) -> Line<'_> {
-    Line::from(vec![Span::styled(
-        format!(
-            "[!] SESSION PRUNED: {} ({}) \u{2014} last seen {}s ago",
-            alert.session_name, alert.role, alert.last_seen_ago_secs
-        ),
-        Style::default()
-            .fg(theme::AMBER)
-            .add_modifier(Modifier::BOLD),
-    )])
+    prune_alert_lines(alert, usize::MAX)
+        .into_iter()
+        .next()
+        .unwrap()
 }
 
-/// Build a styled Line for any feed entry.
-pub fn feed_entry_line(entry: &FeedEntry) -> Line<'_> {
+/// Build styled Lines for any feed entry, wrapping to width.
+pub fn feed_entry_lines(entry: &FeedEntry, width: usize) -> Vec<Line<'_>> {
     match entry {
-        FeedEntry::Message(msg) => message_line(msg),
-        FeedEntry::PruneAlert(alert) => prune_alert_line(alert),
+        FeedEntry::Message(msg) => message_lines(msg, width),
+        FeedEntry::PruneAlert(alert) => prune_alert_lines(alert, width),
     }
 }
 
@@ -61,7 +128,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(theme::MUTED))
         .style(Style::default().bg(theme::BG));
 
-    let inner_height = block.inner(area).height as usize;
+    let inner = block.inner(area);
+    let inner_height = inner.height as usize;
+    let inner_width = inner.width as usize;
     let feed_len = app.feed.len();
 
     // Compute effective scroll offset
@@ -76,7 +145,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .iter()
         .skip(offset)
         .take(inner_height)
-        .map(|entry| ListItem::new(feed_entry_line(entry)))
+        .map(|entry| ListItem::new(feed_entry_lines(entry, inner_width)))
         .collect();
 
     let list = List::new(items).block(block);
@@ -178,6 +247,28 @@ mod tests {
         assert!(line.spans[0].content.contains("[!]"));
         assert!(line.spans[0].content.contains("tester"));
         assert_eq!(line.spans[0].style.fg, Some(theme::AMBER));
+    }
+
+    #[test]
+    fn long_message_wraps_to_multiple_lines() {
+        let long_content = "a".repeat(200);
+        let msg = make_msg(1, "alice", "session-b", &long_content, Priority::Normal);
+        let lines = message_lines(&msg, 60);
+        assert!(
+            lines.len() > 1,
+            "long message should wrap to multiple lines"
+        );
+        // First line has prefix spans + first content chunk
+        assert_eq!(lines[0].spans.len(), 4);
+        // Continuation lines have indent + content
+        assert_eq!(lines[1].spans.len(), 2);
+    }
+
+    #[test]
+    fn short_message_stays_single_line() {
+        let msg = make_msg(1, "alice", "session-b", "short", Priority::Normal);
+        let lines = message_lines(&msg, 80);
+        assert_eq!(lines.len(), 1);
     }
 
     #[test]
