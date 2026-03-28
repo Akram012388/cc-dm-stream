@@ -42,7 +42,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // Title
     let title = Paragraph::new("cc-dm-stream v0.1.9")
         .alignment(Alignment::Center)
-        .style(Style::default().fg(theme::FG).add_modifier(Modifier::BOLD));
+        .style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD));
     frame.render_widget(title, chunks[0]);
 
     // Content area
