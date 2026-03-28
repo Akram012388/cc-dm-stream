@@ -23,7 +23,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::MUTED))
+        .border_style(Style::default().fg(theme::ORANGE))
         .style(Style::default().bg(theme::BG));
 
     let inner = block.inner(area);
