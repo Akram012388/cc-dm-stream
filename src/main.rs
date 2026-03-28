@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
-use futures::StreamExt;
+use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 
