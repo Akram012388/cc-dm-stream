@@ -176,10 +176,14 @@ async fn run_loop(
                     if _watcher_handle.is_none() {
                         _watcher_handle = start_watcher(bd.to_path_buf(), tx.clone()).ok();
                     }
-                    // Also check for bus on tick (in case watcher missed it)
-                    if !app.stats.connected && bp.exists() {
+                    // Always refresh on tick as fallback if watcher dies
+                    if bp.exists() {
                         match &app.state {
-                            AppScreen::Welcome { .. } => refresh_welcome(app, bp),
+                            AppScreen::Welcome { .. } => {
+                                if !app.stats.connected {
+                                    refresh_welcome(app, bp);
+                                }
+                            }
                             AppScreen::Stream => refresh_stream(app, bp),
                         }
                     }

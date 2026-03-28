@@ -25,7 +25,11 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 
 /// Build styled Lines for a message feed entry, wrapping content to width.
 pub fn message_lines(msg: &MessageEntry, width: usize) -> Vec<Line<'_>> {
-    let ts = msg.created_at.format("[%H:%M:%S]").to_string();
+    let ts = msg
+        .created_at
+        .with_timezone(&chrono::Local)
+        .format("[%H:%M:%S]")
+        .to_string();
     let content_color = match msg.priority {
         Priority::Urgent => theme::RED,
         _ => theme::FG,
@@ -121,7 +125,7 @@ pub fn feed_entry_lines(entry: &FeedEntry, width: usize) -> Vec<Line<'_>> {
     }
 }
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .title(" Feed ")
         .borders(Borders::ALL)
@@ -133,6 +137,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     let inner_height = inner.height as usize;
     let inner_width = inner.width as usize;
     let feed_len = app.feed.len();
+
+    // Store visible height for scroll sync in input handlers
+    app.visible_height = inner_height;
 
     // Compute effective scroll offset
     let offset = if app.auto_scroll {
@@ -160,9 +167,9 @@ pub enum StreamAction {
 pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
     let feed_len = app.feed.len();
 
-    // Sync scroll_offset when transitioning out of auto_scroll
+    // Sync scroll_offset to match what draw() renders when auto_scrolling
     if app.auto_scroll {
-        app.scroll_offset = feed_len.saturating_sub(1);
+        app.scroll_offset = feed_len.saturating_sub(app.visible_height);
     }
 
     match key.code {
@@ -178,7 +185,7 @@ pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
             }
         }
         KeyCode::Char(' ') => {
-            app.scroll_offset = feed_len.saturating_sub(1);
+            app.scroll_offset = feed_len.saturating_sub(app.visible_height);
             app.auto_scroll = true;
         }
         _ => {}
@@ -189,9 +196,9 @@ pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
 pub fn handle_mouse_input(app: &mut App, mouse: MouseEvent) {
     let feed_len = app.feed.len();
 
-    // Sync scroll_offset when transitioning out of auto_scroll
+    // Sync scroll_offset to match what draw() renders when auto_scrolling
     if app.auto_scroll {
-        app.scroll_offset = feed_len.saturating_sub(1);
+        app.scroll_offset = feed_len.saturating_sub(app.visible_height);
     }
 
     match mouse.kind {
@@ -305,19 +312,21 @@ mod tests {
     #[test]
     fn scroll_up_disables_auto_scroll() {
         let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.visible_height = 5; // simulate a 5-line panel
         for i in 1..=10 {
             app.process_bus_update(vec![], vec![make_msg(i, "a", "b", "msg", Priority::Normal)]);
         }
-        app.scroll_offset = 9; // at bottom
 
+        // auto_scroll is true, so sync sets offset to 10 - 5 = 5, then Up → 4
         handle_key_input(&mut app, key(KeyCode::Up));
         assert!(!app.auto_scroll);
-        assert_eq!(app.scroll_offset, 8);
+        assert_eq!(app.scroll_offset, 4);
     }
 
     #[test]
     fn space_resets_to_bottom() {
         let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.visible_height = 5;
         for i in 1..=10 {
             app.process_bus_update(vec![], vec![make_msg(i, "a", "b", "msg", Priority::Normal)]);
         }
@@ -326,7 +335,7 @@ mod tests {
 
         handle_key_input(&mut app, key(KeyCode::Char(' ')));
         assert!(app.auto_scroll);
-        assert_eq!(app.scroll_offset, 9); // feed.len() - 1
+        assert_eq!(app.scroll_offset, 5); // feed.len() - visible_height
     }
 
     #[test]
