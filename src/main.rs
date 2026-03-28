@@ -2,6 +2,7 @@ mod app;
 mod bus;
 mod theme;
 mod types;
+mod ui;
 mod watcher;
 
 use clap::Parser;
