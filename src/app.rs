@@ -25,6 +25,7 @@ pub struct App {
     pub scroll_offset: usize,
     pub auto_scroll: bool,
     pub visible_height: usize,
+    pub total_feed_lines: usize,
 }
 
 impl App {
@@ -47,6 +48,7 @@ impl App {
             scroll_offset: 0,
             auto_scroll: true,
             visible_height: 0,
+            total_feed_lines: 0,
         }
     }
 
