@@ -154,8 +154,11 @@ async fn run_loop(
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         tokio::select! {
-            // Bus change event from watcher
+            // Bus change event from watcher — drain all pending events
             Some(_event) = rx.recv() => {
+                // Drain remaining events to prevent channel backup
+                while rx.try_recv().is_ok() {}
+
                 match &app.state {
                     AppScreen::Welcome { .. } => refresh_welcome(app, bp),
                     AppScreen::Stream => refresh_stream(app, bp),
