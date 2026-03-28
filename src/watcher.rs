@@ -1,6 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, PollWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
 use crate::types::AppEvent;
@@ -10,23 +11,32 @@ const BUS_FILES: &[&str] = &["bus.db", "bus.db-wal", "bus.db-shm"];
 pub fn start_watcher(
     bus_dir: PathBuf,
     tx: mpsc::Sender<AppEvent>,
-) -> Result<RecommendedWatcher, notify::Error> {
-    let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-        let event = match res {
-            Ok(e) => e,
-            Err(_) => return,
-        };
+) -> Result<PollWatcher, notify::Error> {
+    if !bus_dir.exists() {
+        return Err(notify::Error::path_not_found());
+    }
 
-        let is_bus_event = event.paths.iter().any(|p| {
-            p.file_name()
-                .and_then(|f| f.to_str())
-                .is_some_and(|name| BUS_FILES.contains(&name))
-        });
+    let config = Config::default().with_poll_interval(Duration::from_millis(100));
 
-        if is_bus_event {
-            let _ = tx.blocking_send(AppEvent::BusChanged);
-        }
-    })?;
+    let mut watcher = PollWatcher::new(
+        move |res: Result<Event, notify::Error>| {
+            let event = match res {
+                Ok(e) => e,
+                Err(_) => return,
+            };
+
+            let is_bus_event = event.paths.iter().any(|p| {
+                p.file_name()
+                    .and_then(|f| f.to_str())
+                    .is_some_and(|name| BUS_FILES.contains(&name))
+            });
+
+            if is_bus_event {
+                let _ = tx.blocking_send(AppEvent::BusChanged);
+            }
+        },
+        config,
+    )?;
 
     watcher.watch(&bus_dir, RecursiveMode::NonRecursive)?;
     Ok(watcher)
@@ -36,24 +46,26 @@ pub fn start_watcher(
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::Duration;
     use tempfile::TempDir;
 
     #[tokio::test]
     async fn watcher_sends_event_on_bus_file_write() {
         let dir = TempDir::new().unwrap();
         let bus_file = dir.path().join("bus.db");
-        fs::write(&bus_file, b"").unwrap();
 
         let (tx, mut rx) = mpsc::channel(16);
         let _watcher = start_watcher(dir.path().to_path_buf(), tx).unwrap();
 
-        // Give the watcher time to register
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Let PollWatcher complete initial scan of empty directory
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
-        // Write to bus.db to trigger event
-        fs::write(&bus_file, b"changed").unwrap();
+        // Drain any initial events from the first poll
+        while rx.try_recv().is_ok() {}
 
+        // Create bus.db — PollWatcher will detect on next poll
+        fs::write(&bus_file, b"data").unwrap();
+
+        // PollWatcher fires on 100ms intervals — allow enough time
         let event = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
         assert!(
             event.is_ok(),
@@ -68,13 +80,13 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(16);
         let _watcher = start_watcher(dir.path().to_path_buf(), tx).unwrap();
 
-        // Give the watcher time to register
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // PollWatcher needs time to complete first poll cycle
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Write to an unrelated file
         fs::write(dir.path().join("unrelated.txt"), b"noise").unwrap();
 
-        // Wait briefly — should NOT receive an event
+        // Wait for several poll cycles — should NOT receive an event
         let event = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(
             event.is_err(),

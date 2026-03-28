@@ -23,6 +23,8 @@
 
 **Consequence:** Directory-level watching catches WAL writes, checkpoint flushes, and edge cases. No timers, no sleep intervals in the hot path.
 
+**2026-03-28 Update:** FSEvents (`RecommendedWatcher` / `kqueue` on macOS) does not reliably fire for `~/.cc-dm/` directory changes — zero events observed during active bus writes in production testing. Root cause is likely FSEvents not monitoring SQLite WAL-mode writes at the directory level. Switched to `notify::PollWatcher` with a 100ms poll interval, which reliably detects changes. This introduces up to 100ms latency (vs the original sub-10ms goal), but the 400ms remaining window before cc-dm's 500ms deletion cycle is comfortable. The poll interval must not exceed 200ms to maintain reliable message capture.
+
 ---
 
 ## ADR-03: Diff-Based Message Capture
@@ -158,15 +160,15 @@
 | Terminal backend | `crossterm` | Cross-platform terminal control, raw mode, events |
 | Async runtime | `tokio` | Event loop, task spawning, channel communication |
 | SQLite | `rusqlite` | Read-only connection to bus.db, WAL-compatible |
-| Filesystem events | `notify` | Cross-platform directory watching (kqueue/inotify) |
+| Filesystem events | `notify` | PollWatcher for directory change detection (100ms interval) |
 | CLI parsing | `clap` | Argument parsing (`--project`) |
 
 ### Event Loop
 
 ```
-notify watches ~/.cc-dm/ directory
+PollWatcher polls ~/.cc-dm/ directory (100ms)
     │
-    ▼ filesystem write detected
+    ▼ change detected
 tokio task: filter event (bus-related files only)
     │
     ▼ bus change confirmed
@@ -196,7 +198,7 @@ crossterm flushes diff to terminal
 ```
 cc-dm sessions ──write──▶ ~/.cc-dm/bus.db (WAL mode)
                                 │
-                    kqueue/inotify event
+                    PollWatcher (100ms)
                                 │
                                 ▼
                         cc-dm-stream (read-only)
