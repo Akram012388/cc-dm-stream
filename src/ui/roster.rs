@@ -152,6 +152,25 @@ mod tests {
     }
 
     #[test]
+    fn roster_width_const_is_30() {
+        assert_eq!(super::super::ROSTER_WIDTH, 30);
+    }
+
+    #[test]
+    fn roster_fits_name_and_role_at_width_30() {
+        // At width 30, "alice (worker) 5s" should fit without truncation
+        let session = make_session("alice", "worker", SessionStatus::Active, 5);
+        let line = roster_item_line(&session, 28); // inner width after border+padding
+        let name_span = &line.spans[1];
+        assert_eq!(*name_span.content, *"alice");
+        let role_span = &line.spans[2];
+        assert!(
+            role_span.content.contains("worker"),
+            "role should not be truncated at width 28"
+        );
+    }
+
+    #[test]
     fn roster_truncates_name_when_very_narrow() {
         let session = make_session("frontend-specialist", "worker", SessionStatus::Active, 5);
         let line = roster_item_line(&session, 15);
