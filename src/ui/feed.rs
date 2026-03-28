@@ -149,37 +149,83 @@ pub fn build_feed_lines(app: &App, width: usize) -> Vec<Line<'static>> {
 }
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
+    use ratatui::layout::{Constraint, Layout};
+
+    let title = if app.search_mode {
+        " Feed [SEARCH] "
+    } else {
+        " Feed "
+    };
+
     let block = Block::default()
-        .title(" Feed ")
+        .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::MUTED))
+        .border_style(Style::default().fg(if app.search_mode {
+            theme::BLUE
+        } else {
+            theme::MUTED
+        }))
         .style(Style::default().bg(theme::BG))
         .padding(ratatui::widgets::Padding::horizontal(1));
 
     let inner = block.inner(area);
-    let inner_height = inner.height as usize;
-    let inner_width = inner.width as usize;
+
+    // Split inner area: search bar (if active) + feed content
+    let (search_area, feed_area) = if app.search_mode {
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(inner);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, inner)
+    };
+
+    let feed_height = feed_area.height as usize;
+    let feed_width = feed_area.width as usize;
 
     // Pre-wrap all lines to panel width — total_lines = actual visual lines
-    let all_lines = build_feed_lines(app, inner_width);
+    let all_lines = build_feed_lines(app, feed_width);
     let total_lines = all_lines.len();
 
     // Store for scroll input handlers
-    app.visible_height = inner_height;
+    app.visible_height = feed_height;
     app.total_feed_lines = total_lines;
 
     // Compute scroll offset in visual lines — exact match to rendered content
     let scroll_y = if app.auto_scroll {
-        total_lines.saturating_sub(inner_height)
+        total_lines.saturating_sub(feed_height)
     } else {
         app.scroll_offset
     };
 
-    // No .wrap() — content is pre-wrapped, scroll math is exact
+    // Render feed — block goes on the outer area, content scrolls in feed_area
     let paragraph = Paragraph::new(all_lines)
         .block(block)
         .scroll((scroll_y as u16, 0));
     frame.render_widget(paragraph, area);
+
+    // Render search bar if active
+    if let Some(search_rect) = search_area {
+        let match_info = if app.search_query.is_empty() {
+            String::new()
+        } else if app.search_matches.is_empty() {
+            " (no matches)".to_string()
+        } else {
+            format!(
+                " ({}/{})",
+                app.search_match_index + 1,
+                app.search_matches.len()
+            )
+        };
+
+        let search_line = Line::from(vec![
+            Span::styled("/ ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                app.search_query.clone(),
+                Style::default().fg(theme::FG),
+            ),
+            Span::styled(match_info, Style::default().fg(theme::MUTED)),
+        ]);
+        frame.render_widget(Paragraph::new(search_line), search_rect);
+    }
 }
 
 pub enum StreamAction {
@@ -187,12 +233,28 @@ pub enum StreamAction {
 }
 
 pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
+    use crossterm::event::KeyModifiers;
+
+    // Search mode captures all input except Esc
+    if app.search_mode {
+        return handle_search_input(app, key);
+    }
+
     if app.auto_scroll {
         app.scroll_offset = app.total_feed_lines.saturating_sub(app.visible_height);
     }
 
+    // Ctrl+F enters search mode
+    if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.enter_search();
+        return None;
+    }
+
     match key.code {
         KeyCode::Char('q') => return Some(StreamAction::Quit),
+        KeyCode::Char('/') => {
+            app.enter_search();
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             app.scroll_offset = app.scroll_offset.saturating_sub(1);
             app.auto_scroll = false;
@@ -207,6 +269,37 @@ pub fn handle_key_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
         KeyCode::Char(' ') => {
             app.scroll_offset = app.total_feed_lines.saturating_sub(app.visible_height);
             app.auto_scroll = true;
+        }
+        _ => {}
+    }
+    None
+}
+
+fn handle_search_input(app: &mut App, key: KeyEvent) -> Option<StreamAction> {
+    use crossterm::event::KeyModifiers;
+
+    match key.code {
+        KeyCode::Esc => {
+            app.exit_search();
+        }
+        KeyCode::Enter => {
+            // Enter navigates to next match (like n)
+            app.search_next();
+        }
+        KeyCode::Backspace => {
+            app.search_query.pop();
+            app.recompute_search_matches();
+        }
+        // Ctrl+N / Ctrl+P for navigation without consuming the character
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_next();
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_prev();
+        }
+        KeyCode::Char(c) => {
+            app.search_query.push(c);
+            app.recompute_search_matches();
         }
         _ => {}
     }
@@ -466,5 +559,102 @@ mod tests {
         ];
         app.process_bus_update(sessions, vec![]);
         assert_eq!(app.stats.active_sessions, 2);
+    }
+
+    // --- Search key handling tests ---
+
+    fn ctrl_key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_f_enters_search_mode() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.state = crate::app::AppScreen::Stream;
+        app.auto_scroll = true;
+        handle_key_input(&mut app, ctrl_key('f'));
+        assert!(app.search_mode);
+        assert!(!app.auto_scroll);
+    }
+
+    #[test]
+    fn slash_enters_search_mode() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.state = crate::app::AppScreen::Stream;
+        handle_key_input(&mut app, key(KeyCode::Char('/')));
+        assert!(app.search_mode);
+    }
+
+    #[test]
+    fn esc_exits_search_mode() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.enter_search();
+        app.search_query = "test".to_string();
+        handle_key_input(&mut app, key(KeyCode::Esc));
+        assert!(!app.search_mode);
+        assert!(app.auto_scroll);
+        assert!(app.search_query.is_empty());
+    }
+
+    #[test]
+    fn typing_in_search_adds_to_query() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.enter_search();
+        handle_key_input(&mut app, key(KeyCode::Char('h')));
+        handle_key_input(&mut app, key(KeyCode::Char('i')));
+        assert_eq!(app.search_query, "hi");
+    }
+
+    #[test]
+    fn backspace_removes_from_query() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.enter_search();
+        app.search_query = "hello".to_string();
+        handle_key_input(&mut app, key(KeyCode::Backspace));
+        assert_eq!(app.search_query, "hell");
+    }
+
+    #[test]
+    fn ctrl_n_navigates_next_in_search() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(
+            vec![],
+            vec![
+                make_msg(1, "a", "b", "match", Priority::Normal),
+                make_msg(2, "a", "b", "match", Priority::Normal),
+            ],
+        );
+        app.enter_search();
+        app.search_query = "match".to_string();
+        app.recompute_search_matches();
+        assert_eq!(app.search_match_index, 0);
+        handle_key_input(&mut app, ctrl_key('n'));
+        assert_eq!(app.search_match_index, 1);
+    }
+
+    #[test]
+    fn ctrl_p_navigates_prev_in_search() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.process_bus_update(
+            vec![],
+            vec![
+                make_msg(1, "a", "b", "match", Priority::Normal),
+                make_msg(2, "a", "b", "match", Priority::Normal),
+            ],
+        );
+        app.enter_search();
+        app.search_query = "match".to_string();
+        app.recompute_search_matches();
+        handle_key_input(&mut app, ctrl_key('p'));
+        assert_eq!(app.search_match_index, 1); // wrapped to last
+    }
+
+    #[test]
+    fn search_mode_blocks_q_quit() {
+        let mut app = App::new(PathBuf::from("/tmp/bus.db"));
+        app.enter_search();
+        let action = handle_key_input(&mut app, key(KeyCode::Char('q')));
+        assert!(action.is_none(), "q should not quit during search");
+        assert_eq!(app.search_query, "q");
     }
 }
